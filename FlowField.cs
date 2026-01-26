@@ -273,3 +273,131 @@ public class Program
         ff.PrintFlow();
     }
 }
+
+using Godot;
+using System;
+using System.Collections.Generic;
+using System.Numerics; // Vector2
+
+public partial class Unit : Node3D
+{
+    [Export] public float MoveSpeed = 5f;
+    [Export] public float CellSize = 1f;
+    [Export] public float Radius = 0.5f;        // 单位半径
+    [Export] public float NeighborDist = 3f;    // RVO 邻居检测距离
+    [Export] public float TimeHorizon = 1.0f;   // RVO 预测时间
+
+    public FlowField FlowFieldRef;
+    public Vector3 Position3D
+    {
+        get => GlobalPosition;
+        set => GlobalPosition = value;
+    }
+
+    private Vector2 velocity = Vector2.Zero;
+
+    public override void _Process(double delta)
+    {
+        if (FlowFieldRef == null) return;
+
+        // 1. 期望速度
+        Vector2 desiredDir = GetFlowDirection(Position3D.X, Position3D.Z);
+        Vector2 vDesired = desiredDir * MoveSpeed;
+
+        // 2. 获取邻居
+        List<Unit> neighbors = GetNearbyUnits();
+
+        // 3. RVO 计算安全速度
+        Vector2 vSafe = ComputeRVO(vDesired, neighbors, (float)delta);
+
+        // 4. 移动单位
+        velocity = vSafe;
+        Position3D += new Vector3(velocity.X, 0, velocity.Y) * (float)delta;
+    }
+
+    private Vector2 GetFlowDirection(float worldX, float worldZ)
+    {
+        float gx = worldX / CellSize;
+        float gz = worldZ / CellSize;
+
+        int x0 = (int)Mathf.Floor(gx);
+        int z0 = (int)Mathf.Floor(gz);
+        int x1 = x0 + 1;
+        int z1 = z0 + 1;
+
+        x0 = Mathf.Clamp(x0, 0, FlowFieldRef.Width - 1);
+        x1 = Mathf.Clamp(x1, 0, FlowFieldRef.Width - 1);
+        z0 = Mathf.Clamp(z0, 0, FlowFieldRef.Height - 1);
+        z1 = Mathf.Clamp(z1, 0, FlowFieldRef.Height - 1);
+
+        float tx = gx - x0;
+        float tz = gz - z0;
+
+        Vector2 f00 = new Vector2(FlowFieldRef.Grid[x0, z0].FlowDirX, FlowFieldRef.Grid[x0, z0].FlowDirY);
+        Vector2 f10 = new Vector2(FlowFieldRef.Grid[x1, z0].FlowDirX, FlowFieldRef.Grid[x1, z0].FlowDirY);
+        Vector2 f01 = new Vector2(FlowFieldRef.Grid[x0, z1].FlowDirX, FlowFieldRef.Grid[x0, z1].FlowDirY);
+        Vector2 f11 = new Vector2(FlowFieldRef.Grid[x1, z1].FlowDirX, FlowFieldRef.Grid[x1, z1].FlowDirY);
+
+        Vector2 f0 = f00 * (1 - tx) + f10 * tx;
+        Vector2 f1 = f01 * (1 - tx) + f11 * tx;
+        Vector2 f = f0 * (1 - tz) + f1 * tz;
+
+        if (f.LengthSquared() > 0)
+            f = Vector2.Normalize(f);
+
+        return f;
+    }
+
+    private List<Unit> GetNearbyUnits()
+    {
+        List<Unit> neighbors = new List<Unit>();
+        foreach (var u in GetTree().GetNodesInGroup("units"))
+        {
+            if (u == this) continue;
+            var other = u as Unit;
+            if (other == null) continue;
+
+            Vector2 diff = new Vector2(other.Position3D.X - Position3D.X, other.Position3D.Z - Position3D.Z);
+            if (diff.Length() < NeighborDist)
+                neighbors.Add(other);
+        }
+        return neighbors;
+    }
+
+    private Vector2 ComputeRVO(Vector2 desiredVelocity, List<Unit> neighbors, float delta)
+    {
+        Vector2 newVel = desiredVelocity;
+
+        foreach (var neighbor in neighbors)
+        {
+            Vector2 posA = new Vector2(Position3D.X, Position3D.Z);
+            Vector2 posB = new Vector2(neighbor.Position3D.X, neighbor.Position3D.Z);
+
+            Vector2 relPos = posB - posA;
+            Vector2 relVel = newVel - new Vector2(neighbor.velocity.X, neighbor.velocity.Y);
+
+            float dist = relPos.Length();
+            float combinedRadius = Radius + neighbor.Radius;
+
+            // 时间预测
+            float t = TimeHorizon;
+
+            // 简化 VO 检测
+            Vector2 w = relVel - relPos / t;
+            float wLen = w.Length();
+            if (wLen < combinedRadius / t)
+            {
+                // 调整速度远离邻居，比例为距离缺口
+                Vector2 avoidDir = Vector2.Normalize(-relPos);
+                float strength = (combinedRadius - dist) / combinedRadius;
+                newVel += avoidDir * MoveSpeed * strength;
+            }
+        }
+
+        // 限制最大速度
+        if (newVel.Length() > MoveSpeed)
+            newVel = Vector2.Normalize(newVel) * MoveSpeed;
+
+        return newVel;
+    }
+}
