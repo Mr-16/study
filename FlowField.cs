@@ -45,15 +45,12 @@ public class FlowField
                 Grid[x, y] = new FlowFieldCell(x, y);
     }
 
+    // 初始化全局流场
     public void ComputeFlowField(int targetX, int targetY)
     {
-        if (targetX < 0 || targetX >= Width || targetY < 0 || targetY >= Height)
-            throw new ArgumentOutOfRangeException("目标坐标超出范围");
-
         this.targetX = targetX;
         this.targetY = targetY;
 
-        // 初始化所有格子
         foreach (var cell in Grid)
         {
             cell.Cost = int.MaxValue;
@@ -83,8 +80,7 @@ public class FlowField
                     continue;
 
                 var neighbor = Grid[nx, ny];
-                if (neighbor.IsObstacle)
-                    continue;
+                if (neighbor.IsObstacle) continue;
 
                 int newCost = currentCost + moveCost;
                 if (newCost < neighbor.Cost)
@@ -98,11 +94,14 @@ public class FlowField
         UpdateFlowDirections();
     }
 
-    private void UpdateFlowDirections()
+    private void UpdateFlowDirections(int minX = 0, int minY = 0, int maxX = -1, int maxY = -1)
     {
-        for (int x = 0; x < Width; x++)
+        if (maxX == -1) maxX = Width - 1;
+        if (maxY == -1) maxY = Height - 1;
+
+        for (int x = minX; x <= maxX; x++)
         {
-            for (int y = 0; y < Height; y++)
+            for (int y = minY; y <= maxY; y++)
             {
                 var cell = Grid[x, y];
                 if (cell.IsObstacle || cell.Cost == int.MaxValue)
@@ -119,7 +118,6 @@ public class FlowField
                 {
                     int nx = x + dx;
                     int ny = y + dy;
-
                     if (nx < 0 || nx >= Width || ny < 0 || ny >= Height)
                         continue;
 
@@ -138,48 +136,62 @@ public class FlowField
         }
     }
 
-    // 增量更新某个格子的障碍状态
-    public void SetObstacle(int x, int y, bool isObstacle)
+    // 高效局部更新障碍
+    public void SetObstacle(int x, int y, bool isObstacle, int radius = 10)
     {
-        if (x < 0 || x >= Width || y < 0 || y >= Height)
-            return;
+        if (x < 0 || x >= Width || y < 0 || y >= Height) return;
 
         var cell = Grid[x, y];
-        if (cell.IsObstacle == isObstacle)
-            return;
+        if (cell.IsObstacle == isObstacle) return;
 
         cell.IsObstacle = isObstacle;
 
-        // 只更新受影响区域
-        var pq = new PriorityQueue<FlowFieldCell, int>();
+        int minX = Math.Max(0, x - radius);
+        int maxX = Math.Min(Width - 1, x + radius);
+        int minY = Math.Max(0, y - radius);
+        int maxY = Math.Min(Height - 1, y + radius);
 
-        // 如果新障碍，先清除自己成本
-        if (isObstacle)
+        // 初始化局部成本
+        for (int ix = minX; ix <= maxX; ix++)
+            for (int iy = minY; iy <= maxY; iy++)
+                if (!Grid[ix, iy].IsObstacle)
+                    Grid[ix, iy].Cost = int.MaxValue;
+
+        // 局部优先队列更新
+        var pq = new PriorityQueue<FlowFieldCell, int>();
+        var targetCell = Grid[targetX, targetY];
+        if (targetCell.X >= minX && targetCell.X <= maxX && targetCell.Y >= minY && targetCell.Y <= maxY)
         {
-            cell.Cost = int.MaxValue;
+            targetCell.Cost = 0;
+            pq.Enqueue(targetCell, 0);
         }
         else
         {
-            // 非障碍，重新计算成本
-            // 从邻居中找最小成本
-            int minCost = int.MaxValue;
-            foreach (var (dx, dy, moveCost) in Directions)
+            // 将边界非障碍格子加入队列，保证局部连通
+            for (int ix = minX; ix <= maxX; ix++)
             {
-                int nx = x + dx;
-                int ny = y + dy;
-                if (nx < 0 || nx >= Width || ny < 0 || ny >= Height)
-                    continue;
-
-                var neighbor = Grid[nx, ny];
-                if (neighbor.Cost < int.MaxValue)
-                    minCost = Math.Min(minCost, neighbor.Cost + moveCost);
+                for (int iy = minY; iy <= maxY; iy++)
+                {
+                    var c = Grid[ix, iy];
+                    if (!c.IsObstacle)
+                    {
+                        foreach (var (dx, dy, moveCost) in Directions)
+                        {
+                            int nx = ix + dx;
+                            int ny = iy + dy;
+                            if (nx < 0 || nx >= Width || ny < 0 || ny >= Height) continue;
+                            var neighbor = Grid[nx, ny];
+                            if (!neighbor.IsObstacle && neighbor.Cost < int.MaxValue)
+                            {
+                                c.Cost = neighbor.Cost + moveCost;
+                                pq.Enqueue(c, c.Cost);
+                                break;
+                            }
+                        }
+                    }
+                }
             }
-
-            if (x == targetX && y == targetY) minCost = 0; // 目标格子
-            cell.Cost = minCost;
         }
-
-        pq.Enqueue(cell, cell.Cost);
 
         while (pq.Count > 0)
         {
@@ -192,8 +204,7 @@ public class FlowField
             {
                 int nx = cx + dx;
                 int ny = cy + dy;
-                if (nx < 0 || nx >= Width || ny < 0 || ny >= Height)
-                    continue;
+                if (nx < minX || nx > maxX || ny < minY || ny > maxY) continue;
 
                 var neighbor = Grid[nx, ny];
                 if (neighbor.IsObstacle) continue;
@@ -207,10 +218,9 @@ public class FlowField
             }
         }
 
-        UpdateFlowDirections();
+        UpdateFlowDirections(minX, minY, maxX, maxY);
     }
 
-    // 打印八方向箭头
     public void PrintFlow()
     {
         for (int y = Height - 1; y >= 0; y--)
@@ -244,21 +254,22 @@ public class FlowField
     }
 }
 
-// 示例测试
+// 测试示例
 public class Program
 {
     public static void Main()
     {
-        FlowField ff = new FlowField(10, 10);
-        ff.ComputeFlowField(9, 9);
+        FlowField ff = new FlowField(20, 20);
+        ff.ComputeFlowField(19, 19);
 
-        ff.SetObstacle(4, 4, true);
-        ff.SetObstacle(4, 5, true);
+        ff.SetObstacle(10, 10, true, radius: 5);
+        ff.SetObstacle(11, 10, true, radius: 5);
 
+        Console.WriteLine("局部障碍更新后：");
         ff.PrintFlow();
 
-        Console.WriteLine("清除障碍");
-        ff.SetObstacle(4, 4, false);
+        Console.WriteLine("清除障碍后局部更新：");
+        ff.SetObstacle(10, 10, false, radius: 5);
         ff.PrintFlow();
     }
 }
