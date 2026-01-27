@@ -1,0 +1,85 @@
+public struct CellPos
+{
+    public int X;
+    public int Y;
+}
+
+public enum FlowDirType : byte
+{
+    Left, Right, Forward, Back, ForwardLeft, ForwardRight, BackLeft, BackRight, None
+}
+
+public struct FlowFieldCell
+{
+    public CellPos Pos;
+    public FlowDirType FlowDir;
+    public int Cost;
+    public bool IsBlock;
+    public FlowFieldCell(int x, int y)
+    {
+        Pos.X = x;
+        Pos.Y = y;
+        FlowDir = FlowDirType.None;
+        Cost = int.MaxValue;
+        IsBlock = false;
+    }
+}
+
+public class FlowFieldManager
+{
+    private static FlowFieldManager instance = new FlowFieldManager();
+    public static FlowFieldManager Instance()
+    {
+        return instance;
+    }
+    private FlowFieldManager()
+    {
+        width = GlobalConstant.WorldSize / cellSize;
+        height = GlobalConstant.WorldSize / cellSize;
+        FlowFieldGrid = new FlowFieldCell[width, height];
+        for(int i = 0; i < width; i++)
+        {
+            for(int j = 0; j < height; j++)
+            {
+                FlowFieldGrid[i, j] = new FlowFieldCell(i, j);
+            }
+        }
+    }
+    private int width;
+    private int height;
+    private float cellSize = 1;
+    private FlowFieldCell[,] FlowFieldGrid;
+    private CellPos WorldPosToCellPos(Vector3 worldPos)
+    {
+        int x = GlobalConstant.WorldSize / 2 + MathF.Floor(worldPos.x / cellSize);
+        int y = GlobalConstant.WorldSize / 2 + MathF.Floor(worldPos.z / cellSize);
+
+        x = Math.Clamp(x, 0, width  - 1);
+        y = Math.Clamp(y, 0, height - 1);
+
+        return new CellPos { X = x, Y = y };
+    }
+
+
+
+    public void Compute(Vector3 targetWorldPos)
+    {
+        CellPos cellPos = WorldPosToCellPos(targetWorldPos);
+        //todo : 
+        // 1. BFS计算Cost
+        // 2. 遍历grid计算flowDir
+    }
+
+    public Vector3 GetVelocity(Vector3 unitWorldPos)
+    {
+        CellPos cellPos = WorldPosToCellPos(unitWorldPos);
+        //00,10,01,11
+        FlowFieldCell cell_00 = FlowFieldGrid[cellPos.X, cellPos.Y];
+        FlowFieldCell cell_10 = FlowFieldGrid[cellPos.X + 1, cellPos.Y];
+        FlowFieldCell cell_01 = FlowFieldGrid[cellPos.X, cellPos.Y + 1];
+        FlowFieldCell cell_11 = FlowFieldGrid[cellPos.X + 1, cellPos.Y + 1];
+
+        //todo:
+        // 插值得到速度
+    }
+}
