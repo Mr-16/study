@@ -1,0 +1,177 @@
+using System.Numerics;
+
+namespace ConsoleApp3
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            Console.WriteLine("Hello, World! ConsoleApp3");
+            //BuildingManager.Instance.PrintGrid();
+            Random rd = new Random();
+
+
+            for(int i = 0; i < 30; i++)
+            {
+                BuildingData curData = BuildingDatabase.Instance.Map["HomeBase"];
+                Building curBd = new Building() { Data = curData };
+                curBd.TestVal = i;
+
+                float x = -GlobalConstant.WorldWidth / 2 + (float)rd.NextDouble() * GlobalConstant.WorldWidth;
+                float z = -GlobalConstant.WorldHeight / 2 + (float)rd.NextDouble() * GlobalConstant.WorldHeight;
+                BuildingManager.Instance.Place(new Vector3(x, 0, z), curBd);
+
+                BuildingManager.Instance.PrintGrid();
+                Console.WriteLine("----------");
+
+                //BuildingManager.Instance.Remove(curBd);
+                //BuildingManager.Instance.PrintGrid();
+                //Console.WriteLine("------------------------------------------------------------");
+            }
+            
+        }
+    }
+    public static class GlobalConstant
+    {
+        public static float WorldWidth = 15;
+        public static float WorldHeight = 8;
+
+        public static string HomeBaseId = "HomeBase";
+    }
+    public static class GlobalHelper
+    {
+        public static Vec2I WorldToGrid(Vector3 worldPos, float cellSize)
+        {
+            int x = (int)MathF.Floor((worldPos.X + GlobalConstant.WorldWidth / 2) / cellSize);
+            int y = (int)MathF.Floor((worldPos.Z + GlobalConstant.WorldHeight / 2) / cellSize);
+            x = Math.Clamp(x, 0, (int)MathF.Ceiling(GlobalConstant.WorldWidth / cellSize) - 1);
+            y = Math.Clamp(y, 0, (int)MathF.Ceiling(GlobalConstant.WorldHeight / cellSize) - 1);
+            return new Vec2I(x, y);
+        }
+    }
+    public struct Vec2I
+    {
+        public int X;
+        public int Y;
+        public Vec2I(int x, int y)
+        {
+            X = x;
+            Y = y;
+        }
+        public override bool Equals(object obj) => obj is Vec2I v && v.X == X && v.Y == Y;
+        public override int GetHashCode() => HashCode.Combine(X, Y);
+    }
+    public class BuildingData
+    {
+        public string Id;
+        public string Name;
+        public int Width;
+        public int Height;
+        public string BuildTime;
+        public string Cost;
+        public string MaxHp;
+    }
+    public class BuildingDatabase
+    {
+        private static BuildingDatabase instance = new BuildingDatabase();
+        public static BuildingDatabase Instance => instance;
+        public Dictionary<string, BuildingData> Map = new Dictionary<string, BuildingData>();
+        private BuildingDatabase()
+        {
+            Map[GlobalConstant.HomeBaseId] = new BuildingData() { Id = GlobalConstant.HomeBaseId, Name = "Home Base", Width = 2, Height = 2, BuildTime = "60s", Cost = "1000", MaxHp = "5000" };
+        }
+    }
+    public class Building
+    {
+        public BuildingData Data;
+        public int TestVal;
+    }
+    public class BuildingManager
+    {
+        private static BuildingManager instance = new BuildingManager();
+        public static BuildingManager Instance => instance;
+        
+
+        private int width = 0;
+        private int height = 0;
+        private float cellSize = 1f;
+        private BuildingManager()
+        {
+            width = (int)MathF.Ceiling(GlobalConstant.WorldWidth / cellSize);
+            height = (int)MathF.Ceiling(GlobalConstant.WorldHeight / cellSize);
+        }
+        private Dictionary<Vec2I, Building> buildingIdMap = new Dictionary<Vec2I, Building>();
+        private Dictionary<Building, List<Vec2I>> cellListMap = new Dictionary<Building, List<Vec2I>>();
+
+        public bool CanPlace(Vector3 worldPos, Building building)
+        {
+            Vec2I startPos = GlobalHelper.WorldToGrid(worldPos, cellSize);
+            startPos.X -= building.Data.Width / 2;
+            startPos.Y -= building.Data.Height / 2;
+            if (startPos.X < 0 || startPos.X + building.Data.Width > width || startPos.Y < 0 || startPos.Y + building.Data.Height > height)
+                return false;
+
+            for(int i = 0; i < building.Data.Height; i++)
+            {
+                for(int j = 0; j < building.Data.Width; j++)
+                {
+                    Vec2I cellPos = new Vec2I(startPos.X + j, startPos.Y + i);
+                    if(buildingIdMap.ContainsKey(cellPos))
+                        return false;
+                }
+            }
+            return true;
+        }
+
+        public void Place(Vector3 worldPos, Building building)
+        {
+            if (CanPlace(worldPos, building) == false)
+                return;
+
+            Vec2I startPos = GlobalHelper.WorldToGrid(worldPos, cellSize);
+            startPos.X -= building.Data.Width / 2;
+            startPos.Y -= building.Data.Height / 2;
+            List<Vec2I> cellList = new List<Vec2I>();
+            for (int i = 0; i < building.Data.Height; i++)
+            {
+                for(int j = 0; j < building.Data.Width; j++)
+                {
+                    Vec2I cellPos = new Vec2I(startPos.X + j, startPos.Y + i);
+                    buildingIdMap[cellPos] = building;
+                    cellList.Add(cellPos);
+                }
+            }
+            cellListMap[building] = cellList;
+        }
+        
+        public void Remove(Building building)
+        {
+            if (cellListMap.TryGetValue(building, out List<Vec2I>? cellList) == false)
+                return;
+            foreach (Vec2I gridPos in cellList)
+            {
+                buildingIdMap.Remove(gridPos);
+            }
+            cellListMap.Remove(building);
+        }
+        
+        public void PrintGrid()
+        {
+            for(int i = 0; i < height; i++)
+            {
+                for(int j = 0; j < width; j++)
+                {
+                    if (buildingIdMap.TryGetValue(new Vec2I(j, i), out Building? bd))
+                    {
+                        Console.Write($"{bd.TestVal}\t");
+                    }
+                    else
+                    {
+                        Console.Write("x\t");
+                    }
+                }
+                Console.WriteLine();
+            }
+        }
+    }
+}
